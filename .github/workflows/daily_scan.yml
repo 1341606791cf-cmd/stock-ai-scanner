@@ -22,8 +22,8 @@ jobs:
       AI_API_KEY: ${{ secrets.AI_API_KEY }}
       QQ_EMAIL: ${{ secrets.QQ_EMAIL }}
       QQ_AUTH_CODE: ${{ secrets.QQ_AUTH_CODE }}
-      AI_BASE_URL: https://api.openai.com/v1
-      AI_MODEL: gpt-4o-mini
+      AI_BASE_URL: https://api.deepseek.com
+      AI_MODEL: deepseek-flash
       TEST_EMAIL: ${{ inputs.test_email }}
     steps:
       - uses: actions/checkout@v4
