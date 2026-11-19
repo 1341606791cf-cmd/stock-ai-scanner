@@ -16,8 +16,8 @@ from openai import OpenAI
 
 
 WATCHLIST = ["QQQ", "GOOGL", "NVDA", "AAPL", "MSFT"]
-AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.openai.com/v1")
-AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
+AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.deepseek.com")
+AI_MODEL = os.getenv("AI_MODEL", "deepseek-flash")
 NEW_YORK = ZoneInfo("America/New_York")
 yf.set_tz_cache_location(str(Path(__file__).parent / "work" / "yfinance-cache"))
 
