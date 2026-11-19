@@ -7,13 +7,13 @@
 ```powershell
 python -m venv .venv-stock
 .\.venv-stock\Scripts\python.exe -m pip install -r stock-requirements.txt
-$env:AI_API_KEY = "你的模型 API Key"
+$env:AI_API_KEY = "你的 DeepSeek API Key"
 $env:QQ_EMAIL = "你的 QQ 邮箱地址"
 $env:QQ_AUTH_CODE = "你的 QQ 邮箱 SMTP 授权码（不是 QQ 密码）"
 .\.venv-stock\Scripts\python.exe stock_ai_scanner.py
 ```
 
-DeepSeek 等兼容接口可另设 `AI_BASE_URL` 和 `AI_MODEL`。测试邮件可运行 `python stock_ai_scanner.py --test-email`，只发送测试邮件，不扫描行情或调用模型。请勿把密钥写进代码、README 或提交记录。
+默认使用 DeepSeek 官方接口和 `deepseek-flash`；其他兼容接口可另设 `AI_BASE_URL` 和 `AI_MODEL`。测试邮件可运行 `python stock_ai_scanner.py --test-email`，只发送测试邮件，不扫描行情或调用模型。请勿把密钥写进代码、README 或提交记录。
 
 ## GitHub Actions
 
