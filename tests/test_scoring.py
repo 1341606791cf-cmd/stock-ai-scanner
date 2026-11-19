@@ -48,7 +48,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(threshold["tier"],"轻仓试探")
         self.assertFalse(scanner.score_stock("COST",frame())["eligible"])
 
-    def test_threshold_gates_ai_and_email(self):
+    def test_threshold_gates_ai_but_summary_is_always_sent(self):
         data = pd.DataFrame({"Close":[100.0]*35},index=pd.date_range("2020-01-01",periods=35))
         below = scanner.score_stock("QQQ",frame())
         above = scanner.score_stock("COST",frame(close=99,rsi=35))
@@ -57,7 +57,50 @@ class ScoringTests(unittest.TestCase):
                 ticker.return_value.history.return_value=data
                 self.assertEqual(scanner.run_scan(),count)
                 self.assertEqual(ai.call_count,count)
-                self.assertEqual(send.call_count,count)
+                send.assert_called_once()
+                if count == 0:
+                    self.assertIn("今日无70分及以上标的", send.call_args.args[0])
+
+    def test_below_threshold_needs_no_ai_key(self):
+        data = pd.DataFrame({"Close": [100.0]*35}, index=pd.date_range("2020-01-01", periods=35))
+        score = scanner.score_stock("QQQ", frame())
+        with patch.dict(os.environ, {"AI_API_KEY": "", "QQ_EMAIL": "test@qq.com", "QQ_AUTH_CODE": "test"}), patch.object(scanner, "WATCHLIST", ["QQQ"]), patch.object(scanner.yf, "Ticker") as ticker, patch.object(scanner, "calculate_indicators", return_value=frame()), patch.object(scanner, "score_stock", return_value=score), patch.object(scanner, "ask_ai_analyst") as ai, patch.object(scanner, "send_qq_email") as send:
+            ticker.return_value.history.return_value = data
+            scanner.run_scan()
+            ai.assert_not_called()
+            send.assert_called_once()
+
+    def test_holiday_sends_dated_summary_without_repeating_ai(self):
+        data = pd.DataFrame({"Close": [100.0]*35}, index=pd.date_range("2020-01-01", periods=35))
+        score = scanner.score_stock("COST", frame(close=99, rsi=35))
+        with patch.dict(os.environ, {"QQ_EMAIL": "test@qq.com", "QQ_AUTH_CODE": "test"}), patch.object(scanner, "WATCHLIST", ["COST"]), patch.object(scanner.yf, "Ticker") as ticker, patch.object(scanner, "calculate_indicators", return_value=frame()), patch.object(scanner, "score_stock", return_value=score), patch.object(scanner, "is_today_in_new_york", return_value=False), patch.object(scanner, "ask_ai_analyst") as ai, patch.object(scanner, "send_qq_email") as send:
+            ticker.return_value.history.return_value = data
+            scanner.run_scan(require_today=True)
+            ai.assert_not_called()
+            self.assertIn("暂无新的完整日线", send.call_args.args[0])
+            self.assertIn("历史数据", send.call_args.args[1])
+            self.assertIn(score["date"], send.call_args.args[2])
+
+    def test_ai_failure_still_sends_real_score(self):
+        data = pd.DataFrame({"Close": [100.0]*35}, index=pd.date_range("2020-01-01", periods=35))
+        score = scanner.score_stock("COST", frame(close=99, rsi=35))
+        with patch.dict(os.environ, {"QQ_EMAIL": "test@qq.com", "QQ_AUTH_CODE": "test"}), patch.object(scanner, "WATCHLIST", ["COST"]), patch.object(scanner.yf, "Ticker") as ticker, patch.object(scanner, "calculate_indicators", return_value=frame()), patch.object(scanner, "score_stock", return_value=score), patch.object(scanner, "ask_ai_analyst", side_effect=RuntimeError("private upstream error")), patch.object(scanner, "send_qq_email") as send:
+            ticker.return_value.history.return_value = data
+            with self.assertRaises(RuntimeError):
+                scanner.run_scan()
+            self.assertIn("1只达到70分及以上", send.call_args.args[0])
+            self.assertIn("AI 研判暂不可用", send.call_args.args[1])
+            self.assertNotIn("private upstream error", send.call_args.args[1])
+
+    def test_data_failure_sends_error_instead_of_false_no_signal(self):
+        with patch.dict(os.environ, {"QQ_EMAIL": "test@qq.com", "QQ_AUTH_CODE": "test"}), patch.object(scanner, "WATCHLIST", ["QQQ"]), patch.object(scanner.yf, "Ticker", side_effect=RuntimeError("private upstream error")), patch.object(scanner, "send_qq_email") as send:
+            with self.assertRaises(RuntimeError):
+                scanner.run_scan()
+            send.assert_called_once()
+            self.assertIn("未能完成评分", send.call_args.args[0])
+            self.assertNotIn("今日无70分", send.call_args.args[0])
+            self.assertIn("行情读取或评分失败", send.call_args.args[1])
+            self.assertNotIn("private upstream error", send.call_args.args[1])
 
     def test_open_session_is_excluded(self):
         df=pd.DataFrame({"Close":[100,101]},index=pd.date_range("2026-11-18",periods=2,tz=scanner.NEW_YORK))

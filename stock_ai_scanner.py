@@ -1,4 +1,4 @@
-"""100-point US stock scoring and QQ HTML email alerts for scores >= 70."""
+"""Weekday QQ summaries; only fresh scores >= 70 call the AI analyst."""
 
 import argparse
 import os
@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import yfinance as yf
 from openai import OpenAI
-from email_reports import render_email, sample_reports
+from email_reports import render_email, report_status, sample_reports
 
 
 WATCHLIST = ["QQQ", "GOOGL", "NVDA", "AAPL", "MSFT", "ASML", "COST"]
@@ -163,41 +163,45 @@ def is_today_in_new_york(df: pd.DataFrame) -> bool:
 
 
 def run_scan(require_today: bool = False) -> int:
-    if not os.getenv("AI_API_KEY") or not os.getenv("QQ_EMAIL") or not os.getenv("QQ_AUTH_CODE"):
-        raise RuntimeError("请配置 AI_API_KEY、QQ_EMAIL 和 QQ_AUTH_CODE 三个环境变量。")
-    print(f"开始扫描 {len(WATCHLIST)} 个标的；仅 >= 70 分时调用 AI 并发邮件。", flush=True)
+    if not os.getenv("QQ_EMAIL") or not os.getenv("QQ_AUTH_CODE"):
+        raise RuntimeError("请配置 QQ_EMAIL 和 QQ_AUTH_CODE 两个邮件环境变量。")
+    print(f"开始扫描 {len(WATCHLIST)} 个标的；每次发送汇总，仅新日线 >= 70 分时调用 AI。", flush=True)
     alerts = []
     scanned = []
     failed = []
+    issues = []
     for ticker in WATCHLIST:
         try:
             df = yf.Ticker(ticker).history(period="3mo", interval="1d", auto_adjust=True, timeout=15)
             df = completed_daily_bars(df)
             if df.empty or len(df) < 30:
                 raise RuntimeError("日线数据不足 30 根")
-            if require_today and not is_today_in_new_york(df):
-                print(f"[{ticker}] 今日美股日线尚未更新，跳过推送。")
-                continue
             df = calculate_indicators(df)
             score = score_stock(ticker, df)
+            score["fresh"] = not require_today or is_today_in_new_york(df)
             scanned.append(score)
             points = '/'.join(str(p['score']) for p in score['parts'])
             print(f"[{ticker}] 日期 {score['date']} | 复权收盘 ${score['close']:.2f} | "
                   f"BOLL/RSI/MACD {points} | 总分 {score['total']}/100 | {score['tier']}", flush=True)
-            if score['eligible']:
-                advice = ask_ai_analyst(ticker, df, score)
+            if not score["fresh"]:
+                print(f"[{ticker}] 无新的纽约当日完整日线，仅展示历史评分，不重复调用 AI。")
+            elif score['eligible']:
+                try:
+                    advice = ask_ai_analyst(ticker, df, score)
+                except Exception as exc:
+                    # AI 故障也要发送评分，且不在邮件或日志中泄露上游异常文本。
+                    advice = "AI 研判暂不可用；本邮件仍展示实际技术指标和评分。"
+                    issues.append(f"{ticker}：AI 研判失败（{type(exc).__name__}）")
+                    failed.append(ticker)
                 alerts.append({**score, 'advice': advice})
         except Exception as exc:
             # 不记录含凭证的上游异常文本。
             print(f"[{ticker}] 扫描或研判失败：{type(exc).__name__}")
             failed.append(ticker)
-    if alerts:
-        plain, formatted = render_email(alerts, scanned)
-        highest = max(r['total'] for r in alerts)
-        send_qq_email(f"美股低吸提醒 | {len(alerts)} 只达标 · 最高 {highest} 分", plain, formatted)
-        print(f"已发送 {len(alerts)} 个达标标的的 HTML 研判邮件。", flush=True)
-    else:
-        print("没有可发送的达标研判，本次不发送邮件。", flush=True)
+            issues.append(f"{ticker}：行情读取或评分失败（{type(exc).__name__}）")
+    plain, formatted = render_email(alerts, scanned, issues=issues)
+    send_qq_email(f"美股每日扫描 | {report_status(scanned, issues)}", plain, formatted)
+    print(f"已发送每日汇总：{report_status(scanned, issues)}。", flush=True)
     if failed:
         raise RuntimeError(f"以下标的未完成扫描：{', '.join(failed)}")
     return len(alerts)
@@ -206,7 +210,7 @@ def run_scan(require_today: bool = False) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="美股日线技术指标和 AI 买点提醒")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--require-today", action="store_true", help="只处理纽约当日完整日线")
+    mode.add_argument("--require-today", action="store_true", help="仅纽约当日完整日线调用 AI；旧日线标注日期并发送状态汇总")
     mode.add_argument("--test-email", action="store_true", help="发送标有虚构数据的 HTML 版式测试邮件")
     mode.add_argument("--preview-email", type=Path, help="保存 HTML 示例，不联网也不发信")
     args = parser.parse_args()
