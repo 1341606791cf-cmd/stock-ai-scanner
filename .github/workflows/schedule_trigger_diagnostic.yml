@@ -1,0 +1,23 @@
+name: Temporary schedule trigger diagnostic
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  push:
+    paths:
+      - '.github/workflows/schedule_trigger_diagnostic.yml'
+permissions:
+  contents: read
+jobs:
+  record-trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Record trigger without sending email
+        env:
+          TRIGGER_EVENT: ${{ github.event_name }}
+          TRIGGER_CRON: ${{ github.event.schedule }}
+        run: |
+          python3 - <<'PY'
+          import os, datetime, json
+          print(json.dumps({"event": os.environ["TRIGGER_EVENT"], "cron": os.environ["TRIGGER_CRON"], "utc": datetime.datetime.now(datetime.timezone.utc).isoformat()}))
+          PY
