@@ -2,6 +2,8 @@
 import json
 import ast
 import math
+import csv
+import re
 import sqlite3
 import time
 import urllib.error
@@ -10,11 +12,53 @@ import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from scoring_core import WATCHLIST, NEW_YORK
 
 EASTMONEY_IDS = {ticker: ("106." if ticker == "LLY" else "105.") + ticker for ticker in WATCHLIST}
+
+
+def parse_sina_quotes(text):
+    """Parse public quote assignments as data. Field 3 uses Beijing time."""
+    quotes = {}
+    for ticker, value in re.findall(r'var\s+hq_str_gb_([a-z0-9_]+)\s*=\s*"([^"\r\n]*)"\s*;', text):
+        ticker = ticker.upper()
+        if ticker not in WATCHLIST or not value:
+            continue
+        try:
+            fields = next(csv.reader([value]))
+            stamp = datetime.strptime(fields[3], "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+            quote = {"time": stamp, "date": stamp.astimezone(NEW_YORK).date().isoformat(),
+                     "open": float(fields[5]), "high": float(fields[6]), "low": float(fields[7]),
+                     "close": float(fields[1]), "volume": float(fields[10])}
+            if not all(math.isfinite(quote[k]) and quote[k] > 0 for k in ("open", "high", "low", "close")):
+                continue
+            if not math.isfinite(quote["volume"]) or quote["volume"] < 0:
+                continue
+            if quote["high"] < max(quote["open"], quote["close"]) or quote["low"] > min(quote["open"], quote["close"]):
+                continue
+            quotes[ticker] = quote
+        except (ValueError, IndexError, OverflowError):
+            continue
+    return quotes
+
+
+def add_sina_intraday(rows, quote, now):
+    """Append only a recent regular-session quote; preserve closed historical bars."""
+    local = now.astimezone(NEW_YORK)
+    quote_local = quote["time"].astimezone(NEW_YORK)
+    if (local.weekday() >= 5 or local.date() != quote_local.date()
+            or not 570 <= local.hour * 60 + local.minute < 960
+            or not 570 <= quote_local.hour * 60 + quote_local.minute < 960
+            or not -120 <= (now - quote["time"]).total_seconds() <= 25 * 60):
+        return rows, False
+    today = local.date()
+    historical = [row for row in rows if pd.Timestamp(row["date"]).date() < today]
+    if not historical or (today - pd.Timestamp(historical[-1]["date"]).date()).days > 7:
+        return rows, False
+    return historical + [{k: v for k, v in quote.items() if k != "time"}], True
 
 
 def parse_eastmoney_response(payload, ticker, start_date, now):
@@ -121,6 +165,15 @@ def fetch_sina_snapshot(progress=None):
             return response.read().decode("utf-8")
     result = {"schema_version": 1, "source": "新浪财经", "provider": "sina", "adjusted": True,
               "adjustment": "新浪前复权（qfq）", "period": "3mo", "interval": "1d", "symbols": {}, "errors": []}
+    result["notices"] = []
+    quotes = {}
+    try:
+        quote_url = "https://hq.sinajs.cn/list=" + ",".join("gb_" + ticker.lower() for ticker in WATCHLIST)
+        request = urllib.request.Request(quote_url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"})
+        with opener.open(request, timeout=12) as response:
+            quotes = parse_sina_quotes(response.read().decode("gb18030", errors="replace"))
+    except (OSError, ValueError):
+        result["notices"].append("新浪当天报价暂不可用；保留历史日线，不生成虚假的盘中数据。")
     for position, ticker in enumerate(WATCHLIST):
         if progress:
             progress(position, len(WATCHLIST), ticker)
@@ -138,8 +191,13 @@ def fetch_sina_snapshot(progress=None):
             factors = json.JSONDecoder().raw_decode(value.lstrip())[0]["data"]
         except json.JSONDecodeError:
             factors = ast.literal_eval(value.splitlines()[0])["data"]
-        bars = apply_sina_adjustment(rows, factors, start, now)
+        quote = quotes.get(ticker)
+        merged, provisional = add_sina_intraday(rows, quote, now) if quote else (rows, False)
+        bars = apply_sina_adjustment(merged, factors, start, now)
         result["symbols"][ticker] = {"fetched_at_utc": now.isoformat(), "provider": "sina", "bars": bars}
+        if provisional:
+            result["symbols"][ticker]["quote_time_utc"] = quote["time"].astimezone(timezone.utc).isoformat()
+            result["symbols"][ticker]["intraday_method"] = "新浪同源当天报价构造未完成日线，并按同一前复权因子计算；报价可能延迟。"
     result["fetched_at_utc"] = datetime.now(timezone.utc).isoformat()
     return result
 

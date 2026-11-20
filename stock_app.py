@@ -20,7 +20,7 @@ from local_stock_report import analyze_snapshot, fetch_cloud_snapshot, fetch_yah
 from domestic_data import fetch_sina_snapshot, fetch_eastmoney_snapshot, MarketDatabase
 from scoring_core import WATCHLIST
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 APP_ID = "local-stock-assistant"
 ASSETS = Path(__file__).resolve().parent / "app_assets"
 DEFAULT_SETTINGS = {"source": "auto", "proxy": "", "auto_refresh_minutes": 0, "refresh_on_start": True}

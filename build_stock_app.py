@@ -17,7 +17,7 @@ if __name__ == "__main__":
     shutil.copytree(ROOT / "app_assets", resources, dirs_exist_ok=True)
     shutil.copyfile(seed, resources / "seed.json")
     command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--onedir", "--windowed", "--noupx",
-               "--name", "美股评分助手", "--distpath", str(ROOT / "outputs" / "v1.1.0"),
+               "--name", "美股评分助手", "--distpath", str(ROOT / "outputs" / "v1.1.1"),
                "--workpath", str(ROOT / "work" / "app-build"), "--specpath", str(ROOT / "work"),
                "--add-data", str(resources) + ":app_assets",
                "--collect-data", "tzdata", "--collect-data", "certifi", "--collect-all", "curl_cffi", "--collect-all", "py_mini_racer",
