@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 
-WATCHLIST = ["QQQ", "GOOGL", "NVDA", "AAPL", "MSFT", "ASML", "COST"]
+WATCHLIST = ["QQQ", "GOOGL", "NVDA", "AAPL", "MSFT", "ASML", "COST", "LLY"]
 
 
 SCORE_THRESHOLD = 70

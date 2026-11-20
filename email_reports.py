@@ -4,7 +4,7 @@ from html import escape
 from zoneinfo import ZoneInfo
 
 NAMES = {"QQQ": "纳斯达克100 ETF", "GOOGL": "谷歌", "NVDA": "英伟达", "AAPL": "苹果",
-         "MSFT": "微软", "ASML": "阿斯麦", "COST": "开市客"}
+         "MSFT": "微软", "ASML": "阿斯麦", "COST": "开市客", "LLY": "礼来"}
 
 def report_status(scanned, issues=()):
     fresh = [r for r in scanned if r.get("fresh", True)]
@@ -95,4 +95,5 @@ def sample_reports():
                                      ["示例：价格接近下轨","示例：RSI进入超卖区","示例：MACD企稳信号"])],
                         "advice":"形态：这是版式测试，价格和得分均为虚构。\n观察：实际提醒会展示DeepSeek对达标标的的研判。\n风险：示例不构成实际交易信号。"})
     return reports
+
 

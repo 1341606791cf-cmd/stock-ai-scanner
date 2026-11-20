@@ -13,12 +13,14 @@ import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 import yfinance as yf
 from local_stock_report import analyze_snapshot, fetch_cloud_snapshot, fetch_yahoo_snapshot, render_report
+from domestic_data import fetch_sina_snapshot, fetch_eastmoney_snapshot, MarketDatabase
+from scoring_core import WATCHLIST
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 APP_ID = "local-stock-assistant"
 ASSETS = Path(__file__).resolve().parent / "app_assets"
 DEFAULT_SETTINGS = {"source": "auto", "proxy": "", "auto_refresh_minutes": 0, "refresh_on_start": True}
@@ -32,7 +34,7 @@ def write_json(path, value):
 
 def validate_settings(value):
     result = {**DEFAULT_SETTINGS, **value}
-    if result["source"] not in ("auto", "cloud", "yahoo"):
+    if result["source"] not in ("auto", "sina", "eastmoney", "cloud", "yahoo"):
         raise ValueError("请选择有效的数据来源。")
     proxy = str(result["proxy"]).strip()
     if proxy:
@@ -51,6 +53,7 @@ class Dashboard:
     def __init__(self, data_dir, seed=None):
         self.directory = Path(data_dir)
         self.directory.mkdir(parents=True, exist_ok=True)
+        self.database = MarketDatabase(self.directory / "market-data.sqlite3")
         self.lock = threading.RLock()
         self.token = secrets.token_urlsafe(32)
         self.settings = dict(DEFAULT_SETTINGS)
@@ -80,9 +83,10 @@ class Dashboard:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 analysis = analyze_snapshot(data)
-                if len(analysis["reports"]["closed"]) != 7 or analysis["errors"]:
+                if len(analysis["reports"]["closed"]) != len(WATCHLIST) or analysis["errors"]:
                     continue
                 self.snapshot, self.analysis = data, analysis
+                self.database.save(data)
                 self.revision = 1
                 break
             except (ValueError, OSError, TypeError, KeyError):
@@ -95,7 +99,8 @@ class Dashboard:
                     "message": self.message, "error": self.error, "ready": self.snapshot is not None,
                     "revision": self.revision, "settings": dict(self.settings), "fetched_at_utc": fetched,
                     "age_seconds": (datetime.now(timezone.utc) - self.analysis["fetched"]).total_seconds() if self.analysis else None,
-                    "source_used": self.source_used, "last_attempt": self.last_attempt}
+                    "source_used": self.source_used, "last_attempt": self.last_attempt,
+                    "provider_name": self.snapshot.get("source") if self.snapshot else None}
 
     def update_settings(self, value):
         settings = validate_settings(value)
@@ -123,44 +128,48 @@ class Dashboard:
             self.message = f"正在读取 {ticker}（{done + 1}/{total}）…"
 
     def _refresh(self, options):
-        fallback = False
+        failures = []
         try:
             source, proxy = options["source"], options["proxy"] or None
-            candidate = None
-            if source in ("auto", "yahoo"):
-                try:
-                    candidate = fetch_yahoo_snapshot(proxy=proxy, progress=self._progress, stop_on_error=True)
-                    if candidate["errors"] or len(candidate["symbols"]) != 7:
-                        raise RuntimeError("Yahoo暂不可用")
-                except Exception:
-                    if source == "yahoo":
-                        raise RuntimeError("Yahoo连接失败或限流。可配置本地代理，或改用自动／云端快照。") from None
-                    fallback = True
-                    candidate = None
-            if candidate is None:
+            labels = {"sina": "新浪财经", "eastmoney": "东方财富", "yahoo": "Yahoo", "cloud": "云端快照"}
+            chain = ("sina", "eastmoney", "yahoo", "cloud") if source == "auto" else (source,)
+            candidate = analysis = used = None
+            for provider in chain:
                 with self.lock:
-                    self.progress = 40
-                    self.message = "正在导入最新已发布的云端快照…" if not fallback else "Yahoo暂不可用，改为导入云端快照…"
-                candidate = fetch_cloud_snapshot(proxy=proxy)
-                used = "cloud"
-            else:
-                used = "yahoo"
-            analysis = analyze_snapshot(candidate)
-            if analysis["errors"] or len(analysis["reports"]["closed"]) != 7:
-                raise RuntimeError("行情不完整，已保留上次正常报告。")
+                    self.message = "正在读取" + labels[provider] + "行情…"
+                try:
+                    if provider == "sina":
+                        selected = fetch_sina_snapshot(progress=self._progress)
+                    elif provider == "eastmoney":
+                        selected = fetch_eastmoney_snapshot(progress=self._progress)
+                    elif provider == "yahoo":
+                        selected = fetch_yahoo_snapshot(proxy=proxy, progress=self._progress, stop_on_error=True)
+                    else:
+                        selected = fetch_cloud_snapshot(proxy=proxy)
+                    checked = analyze_snapshot(selected)
+                    if checked["errors"] or len(checked["reports"]["closed"]) != len(WATCHLIST):
+                        raise ValueError("行情未完整返回8只标的")
+                    candidate, analysis, used = selected, checked, provider
+                    break
+                except Exception:
+                    logging.exception("Provider %s failed", provider)
+                    failures.append(labels[provider])
+            if candidate is None:
+                raise RuntimeError("、".join(failures) + "连接失败或行情不完整。已保留上次报告；可稍后重试或切换来源。")
             with self.lock:
                 self.progress = 90
                 self.message = "正在计算指标并保存…"
                 previous_stamp = self.snapshot.get("fetched_at_utc") if self.snapshot else None
                 write_json(self.directory / "latest-data.json", candidate)
+                self.database.save(candidate)
                 self.snapshot, self.analysis = candidate, analysis
                 self.source_used = used
                 self.revision += 1
                 stamp = analysis["fetched"].astimezone(__import__('zoneinfo').ZoneInfo("Asia/Shanghai")).strftime("%m月%d日 %H:%M")
                 if used == "cloud":
                     self.message = ("云端暂无更新，仍为" if previous_stamp == candidate["fetched_at_utc"] else "已导入云端快照，获取于") + stamp + "（北京时间）。"
-                    if fallback:
-                        self.message = "Yahoo暂不可用；" + self.message
+                    if failures:
+                        self.message = "、".join(failures) + "暂不可用；" + self.message
                 else:
                     self.message = "已重新下载行情并计算评分，获取于" + stamp + "（北京时间）。"
                 self.progress = 100
@@ -174,11 +183,13 @@ class Dashboard:
                 self.busy = False
                 self.last_refresh = time.monotonic()
 
-    def report_html(self):
+    def report_html(self, history_id=None):
         with self.lock:
-            if not self.snapshot:
+            selected = self.database.snapshot(history_id) if history_id else self.snapshot
+            if not selected:
                 return '<html lang="zh-CN"><meta charset="utf-8"><body style="font:16px system-ui;padding:40px;color:#52647a">暂无本地行情，请点击上方“更新数据”。</body></html>'
-            html = render_report(self.snapshot, self.analysis, "/api/export")
+            analysis = analyze_snapshot(selected) if history_id else self.analysis
+            html = render_report(selected, analysis, "/api/export" + ("?history=" + str(int(history_id)) if history_id else ""))
         html = html.replace("<style>", "<style>header{display:none!important}main{max-width:1200px!important;padding:22px!important}", 1)
         return html.replace('此文件是本地快照；按“刷新评分报告.cmd”重新导入更新。', '使用应用顶部“更新数据”按钮更新；请始终核对行情获取时间。')
 
@@ -233,9 +244,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(404, {"error": "暂无数据"})
             else:
                 with app.lock:
-                    self.respond(200, app.snapshot, attachment=True)
+                    query = parse_qs(urlsplit(self.path).query)
+                    try:
+                        selected = app.database.snapshot(query["history"][0]) if query.get("history") else app.snapshot
+                        self.respond(200, selected, attachment=True)
+                    except ValueError:
+                        self.respond(404, {"error": "历史记录不存在"})
+        elif route == "/api/history":
+            self.respond(200, app.database.history())
         elif route == "/report":
-            self.respond(200, app.report_html(), "text/html; charset=utf-8")
+            query = parse_qs(urlsplit(self.path).query)
+            try:
+                self.respond(200, app.report_html(query.get("history", [None])[0]), "text/html; charset=utf-8")
+            except (ValueError, TypeError):
+                self.respond(404, {"error": "历史记录不存在"})
         elif route == "/":
             html = (ASSETS / "index.html").read_text(encoding="utf-8").replace("__APP_TOKEN__", app.token)
             self.respond(200, html, "text/html; charset=utf-8")

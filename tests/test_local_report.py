@@ -23,7 +23,7 @@ class LocalReportTests(unittest.TestCase):
     def test_closed_score_excludes_current_bar_across_dst(self):
         data = local.analyze_snapshot(snapshot())
         self.assertEqual(data["errors"], [])
-        self.assertEqual(len(data["reports"]["closed"]), 7)
+        self.assertEqual(len(data["reports"]["closed"]), len(scanner.WATCHLIST))
         closed = data["reports"]["closed"][0]
         intraday = data["reports"]["intraday"][0]
         self.assertEqual(closed["date"], "2026-11-19")
@@ -74,3 +74,4 @@ class LocalReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

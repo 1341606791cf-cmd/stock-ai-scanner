@@ -31,7 +31,7 @@ class DashboardTests(unittest.TestCase):
     def test_auto_fallback_does_not_present_old_snapshot_as_new(self):
         with tempfile.TemporaryDirectory() as folder:
             app = self.make_app(folder)
-            with patch("stock_app.fetch_yahoo_snapshot", side_effect=OSError("limited")), patch("stock_app.fetch_cloud_snapshot", return_value=snapshot()):
+            with patch("stock_app.fetch_sina_snapshot", side_effect=OSError("offline")), patch("stock_app.fetch_eastmoney_snapshot", side_effect=OSError("limited")), patch("stock_app.fetch_yahoo_snapshot", side_effect=OSError("limited")), patch("stock_app.fetch_cloud_snapshot", return_value=snapshot()):
                 app._refresh({"source": "auto", "proxy": ""})
             self.assertEqual(app.state()["source_used"], "cloud")
             self.assertIn("暂无更新", app.state()["message"])

@@ -6,6 +6,7 @@ on:
       - 'stock_ai_scanner.py'
       - 'local_stock_report.py'
       - 'scoring_core.py'
+      - 'domestic_data.py'
       - 'stock_app.py'
       - 'app_assets/**'
       - 'email_reports.py'
