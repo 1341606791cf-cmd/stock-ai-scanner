@@ -1,4 +1,4 @@
-"""Weekday QQ summaries; only fresh scores >= 70 call the AI analyst."""
+"""Scoring formulas; the default command opens a local report, without email or AI."""
 
 import argparse
 import os
@@ -208,24 +208,8 @@ def run_scan(require_today: bool = False) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="美股日线技术指标和 AI 买点提醒")
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--require-today", action="store_true", help="仅纽约当日完整日线调用 AI；旧日线标注日期并发送状态汇总")
-    mode.add_argument("--test-email", action="store_true", help="发送标有虚构数据的 HTML 版式测试邮件")
-    mode.add_argument("--preview-email", type=Path, help="保存 HTML 示例，不联网也不发信")
-    args = parser.parse_args()
-    if args.test_email or args.preview_email:
-        examples = sample_reports()
-        plain, formatted = render_email(examples, examples, preview=True)
-        if args.preview_email:
-            args.preview_email.parent.mkdir(parents=True, exist_ok=True)
-            args.preview_email.write_text(formatted, encoding='utf-8')
-            print(f"HTML 示例已保存：{args.preview_email}")
-        else:
-            send_qq_email("版式测试 | 美股低吸评分报告（虚构示例）", plain, formatted)
-            print("HTML 测试邮件已发送。")
-    else:
-        run_scan(require_today=args.require_today)
+    from local_stock_report import main as local_main
+    local_main()
 
 
 if __name__ == "__main__":
