@@ -1,0 +1,43 @@
+name: Requested morning catch-up scan
+on:
+  push:
+    paths:
+      - '.github/workflows/requested_morning_catchup.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AI_API_KEY: ${{ secrets.AI_API_KEY }}
+      QQ_EMAIL: ${{ secrets.QQ_EMAIL }}
+      QQ_AUTH_CODE: ${{ secrets.QQ_AUTH_CODE }}
+      AI_BASE_URL: https://api.deepseek.com
+      AI_MODEL: deepseek-flash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: stock-requirements.txt
+      - run: python -m pip install -r stock-requirements.txt
+      - name: Validate scoring and email behavior
+        run: python -m unittest discover -s tests -v
+      - name: Send requested real morning report
+        run: python stock_ai_scanner.py --require-today
+      - name: Inspect daily workflow state
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          url = "https://api.github.com/repos/1341606791cf-cmd/stock-ai-scanner/actions/workflows/daily_scan.yml"
+          request = urllib.request.Request(url, headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json"})
+          with urllib.request.urlopen(request, timeout=20) as response:
+              data = json.load(response)
+          print("DAILY_WORKFLOW_STATE", data.get("state"), data.get("path"))
+          PY
