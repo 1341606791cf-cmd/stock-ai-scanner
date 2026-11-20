@@ -1,5 +1,13 @@
 # 美股本地评分报告
 
+Windows应用“美股评分助手”已提供独立可执行版本：双击 outputs/美股评分助手/美股评分助手.exe，或桌面快捷方式。
+应用包含评分总览、规则说明、已收盘与盘中视图、更新按钮、代理设置、离线缓存和JSON导出。
+自动来源会先尝试Yahoo，失败时明确退回云端快照；请核对行情获取时间。自动更新只在应用运行时生效。
+保留整个应用文件夹，_internal是必要运行文件；设置和行情保存在旁边的“数据”文件夹。
+
+源码启动：python stock_app.py；打包：安装pyinstaller>=6.22,<7后运行python build_stock_app.py。
+打包版包含Python运行时和依赖，无需最终用户单独安装Python。Windows存在Edge时以独立应用窗口打开，否则使用默认浏览器。
+
 监控 QQQ、GOOGL、NVDA、AAPL、MSFT、ASML、COST。默认运行只生成并打开本地HTML报告，不发送QQ邮件、不调用AI，也不需要邮箱或大模型密钥。
 
 ## 本地查看与更新
@@ -54,4 +62,5 @@ GitHub工作流只安装依赖、验证、更新公开行情JSON和HTML，不读
 
 依赖安装：python -m pip install -r stock-requirements.txt
 测试：python -m unittest discover -s tests -v
+
 

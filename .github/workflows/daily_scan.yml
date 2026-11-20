@@ -5,6 +5,9 @@ on:
     paths:
       - 'stock_ai_scanner.py'
       - 'local_stock_report.py'
+      - 'scoring_core.py'
+      - 'stock_app.py'
+      - 'app_assets/**'
       - 'email_reports.py'
       - 'stock-requirements.txt'
       - 'tests/**'
@@ -48,4 +51,5 @@ jobs:
             git commit -m 'Update public market snapshot for local reports'
             git push origin HEAD:main
           fi
+
 

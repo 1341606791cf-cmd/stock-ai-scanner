@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import yfinance as yf
 
-from stock_ai_scanner import WATCHLIST, NEW_YORK, calculate_indicators, completed_daily_bars, score_stock
+from scoring_core import WATCHLIST, NEW_YORK, calculate_indicators, completed_daily_bars, score_stock
 from email_reports import NAMES
 
 ROOT = Path(__file__).resolve().parent
@@ -22,13 +22,16 @@ BEIJING = ZoneInfo("Asia/Shanghai")
 SNAPSHOT_URL = "https://raw.githubusercontent.com/1341606791cf-cmd/stock-ai-scanner/main/reports/latest-data.json"
 
 
-def fetch_yahoo_snapshot():
+def fetch_yahoo_snapshot(proxy=None, progress=None, stop_on_error=False):
+    yf.set_config(proxy=proxy or None)
     result = {"schema_version": 1, "source": "Yahoo Finance / yfinance", "adjusted": True,
               "period": "3mo", "interval": "1d", "symbols": {}, "errors": []}
-    for ticker in WATCHLIST:
+    for position, ticker in enumerate(WATCHLIST):
+        if progress:
+            progress(position, len(WATCHLIST), ticker)
         started = datetime.now(timezone.utc).isoformat()
         try:
-            df = yf.Ticker(ticker).history(period="3mo", interval="1d", auto_adjust=True, timeout=20)
+            df = yf.Ticker(ticker).history(period="3mo", interval="1d", auto_adjust=True, timeout=12)
             if df.empty or len(df) < 30:
                 raise RuntimeError("日线不足30根")
             bars = []
@@ -44,15 +47,18 @@ def fetch_yahoo_snapshot():
             print(f"{ticker}: downloaded {len(bars)} daily bars", flush=True)
         except Exception as exc:
             result["errors"].append(f"{ticker}: {type(exc).__name__}")
+            if stop_on_error:
+                break
     result["fetched_at_utc"] = datetime.now(timezone.utc).isoformat()
     return result
 
 
-def fetch_cloud_snapshot():
+def fetch_cloud_snapshot(proxy=None):
     # Public, non-secret market snapshot. No API key, email account or model call.
     request = urllib.request.Request(SNAPSHOT_URL + "?t=" + str(int(datetime.now().timestamp())),
                                      headers={"User-Agent": "LocalStockReport/1.0", "Cache-Control": "no-cache"})
-    with urllib.request.urlopen(request, timeout=25) as response:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy})) if proxy else urllib.request.build_opener()
+    with opener.open(request, timeout=25) as response:
         return json.load(response)
 
 
@@ -187,3 +193,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
+
