@@ -11,7 +11,7 @@ on:
   schedule:
     # 北京时间周一至周五 06:30 = UTC 周日至周四 22:30。
     # 休市或日线未更新也发状态邮件，并标明最近数据日期，不重复调用 AI。
-    - cron: '30 22 * * 0-4'
+    - cron: '30 22 * * 0,1,2,3,4'
   workflow_dispatch:
     inputs:
       test_email:
